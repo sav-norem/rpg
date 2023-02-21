@@ -1,5 +1,6 @@
 import redis
 import random
+from collections import defaultdict
 
 r = redis.Redis()
 
@@ -20,9 +21,16 @@ class player_def:
     def __init__(self):
         self.health = 20
         self.damage = 2
-        self.inventory = []
+        self.inventory = {
+            "weapons": [],
+            "potions": []
+        }
         self.name = ''
         self.location = 0
+        self.strongest_weapon = -1
+
+    # def update_strongest_weapon(self):
+        
 
 class monster_def:
     def __init__(self):
@@ -31,11 +39,14 @@ class monster_def:
 
 class chest_def:
     def __init__(self):
-        self.items = []
+        self.items = {
+            "weapons": [],
+            "potions": []
+        }
 
 # a function that adds random spots that will have encounters
 def pop_encounters():
-    num_encounters = random.randrange(0, int(rows*cols / 4))
+    num_encounters = random.randrange(int(rows*cols / 5), int(rows*cols / 2))
     while num_encounters != 0:
         encounter_bit = random.randrange(0, rows*cols)
         print("encounter :", encounter_bit)
@@ -54,7 +65,7 @@ def pop_encounters():
 def pop_test_encounters():
     encounter_bit = random.randrange(0, rows*cols)
     print("encounter :", encounter_bit)
-    encounter_type = "monsters"
+    encounter_type = "chests"
     space_def[encounter_type] += 1
     r.json().set(f"encounters:{encounter_bit}", "$", space_def)
 
@@ -66,13 +77,16 @@ def check_encounters():
             fight_monster()
             enc["monsters"] -= 1
             r.json().set(f"encounters:{player.location}", "$", enc)
-        if enc["chests"] > 0:
+        while enc["chests"] > 0:
             print("you found a chest!")
             loot_chest()
+            enc["chests"] -= 1
+            r.json().set(f"encounters:{player.location}", "$", enc)
 
 
 def fight_monster():
     monster = monster_def()
+    # also randomize monster damage
     monster.health = random.randrange(1,5)
     while monster.health > 0:
         fight = input("fight the monster? (y or n)")
@@ -83,12 +97,13 @@ def fight_monster():
         if fight == "y":        
             player.health -= monster.damage 
             if player.health > 0:
-                if not player.inventory:
+                if player.strongest_weapon < 0:
                     print("you're punching a monster!")
                     monster.health -= player.damage
                 else:
                     print("you can use your weapon!")
-                    monster.health -= player.inventory[0]["damage"]
+                    print(type(player.inventory["weapons"][0]))
+                    monster.health -= player.strongest_weapon
 
     if monster.health <= 0:
         print("you defeated the monster!")
@@ -98,11 +113,23 @@ def fight_monster():
 
 def loot_chest():
     chest = chest_def()
-    chest.items.append(random.choice(weapons))
-    choice = input(f'do you want to take the {chest.items[0]["type"]} that does {chest.items[0]["damage"]} damage? (y or n)')
-    if choice == "y":
-        player.inventory.append(chest.items[0])
-
+    num_items = random.randrange(1, 3)
+    while num_items > 0: 
+        item_type = random.choice(["weapons", "potions"])
+        # item_type = "potions"
+        if item_type == "potions":
+            chest.items[item_type].append(random.randrange(5,15))
+        else:
+            chest.items[item_type].append(random.choice(weapons))
+        num_items -= 1
+    # player.inventory.update(chest.items)
+    de = defaultdict(list, player.inventory)
+    for i, j in chest.items.items():
+        de[i].extend(j)
+    player.inventory = de
+    
+    # player.update_strongest_weapon
+    
 # a function that checks if a player is on an edge and therefore cannot move in a certain direction
 def check_edge():
     movement_options = {
@@ -173,6 +200,14 @@ def main():
     # pop_test_encounters()
     r.setbit("map_game", map_entrance, 1)
     while player.location != map_exit and player.health > 0:
+        if player.inventory["potions"]:
+            use_potion = input("would you like to use a potion? (y or n)")
+            if use_potion == "y":
+                print(player.inventory["potions"])
+                potion_choice = int(input("enter the index of the potin you want to use"))
+                player.health += player.inventory["potions"][potion_choice]
+                player.inventory["potions"].pop(potion_choice)
+                print(player.health)
         move_char()
         check_encounters()
     if player.health > 0:
